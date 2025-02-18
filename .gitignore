@@ -1,0 +1,64 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+miniconda
+.vscode
+
+bin/inverse
+bin/threshold
+bin/quantize
+bin/normalize
+bin/equalize
+bin/thresholdOtsu
+bin/ccLabel
+bin/ccAreaFilter
+bin/ccLabel2pass
+bin/transpose
+bin/expand
+bin/rotate
+bin/meanFilter
+bin/convolution
+bin/edgeSobel
+bin/bilateralFilter
+bin/median
+bin/erode
+bin/dilate
+bin/open
+bin/close
+bin/morphologicalGradient
+
+bin/test
+
+bin/out.png
+bin/out.jpg
+
