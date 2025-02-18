@@ -13,13 +13,8 @@ Mat inverse(Mat image)
 {
     // clone original image
     Mat res = image.clone();
-      /********************************************
-                YOUR CODE HERE
-    *********************************************/
     cv::subtract(1.0f, image, res);
-    /********************************************
-                END OF YOUR CODE
-    *********************************************/
+
     return res;
 }
 
@@ -34,16 +29,10 @@ Mat threshold(Mat image, float lowT, float highT)
 {
     Mat res = image.clone();
     assert(lowT <= highT);
-    /********************************************
-                YOUR CODE HERE
-    *********************************************/
+
     cv::threshold(image, res, highT, 1.0f, cv::THRESH_BINARY_INV);
     cv::threshold(res, res, lowT, 0.0f, cv::THRESH_BINARY);
 
-    
-    /********************************************
-                END OF YOUR CODE
-    *********************************************/
     return res;
 }
 
@@ -68,9 +57,6 @@ Mat quantize(Mat image, int numberOfLevels)
 {
     Mat res = image.clone();
     assert(numberOfLevels>0);
-    /********************************************
-                YOUR CODE HERE
-    *********************************************/
     float step = 1.0f / numberOfLevels;
     for(int i = 0; i < image.rows; i++) {
         for(int j = 0; j < image.cols; j++) {
@@ -81,9 +67,6 @@ Mat quantize(Mat image, int numberOfLevels)
             if(level == numberOfLevels - 1) res.at<float>(i,j) = 1.0f;
         }
     }
-    /********************************************
-                END OF YOUR CODE
-    *********************************************/
     return res;
 }
 
@@ -95,9 +78,6 @@ Mat normalize(Mat image, float minValue, float maxValue)
 {
     Mat res = image.clone();
     assert(minValue <= maxValue);
-    /********************************************
-                YOUR CODE HERE
-    *********************************************/
     double minVal, maxVal;
     cv::minMaxLoc(image, &minVal, &maxVal);
     
@@ -106,9 +86,6 @@ Mat normalize(Mat image, float minValue, float maxValue)
     } else {
         res = Mat::ones(image.size(), image.type()) * minValue;
     }
-    /********************************************
-                END OF YOUR CODE
-    *********************************************/
     return res;
 }
 
@@ -121,10 +98,7 @@ Mat normalize(Mat image, float minValue, float maxValue)
 Mat equalize(Mat image)
 {
     Mat res = image.clone();
-    /********************************************
-                YOUR CODE HERE
-    *********************************************/
-    // Calculate histogram
+
     int histogram[256] = {0};
     for(int i = 0; i < image.rows; i++) {
         for(int j = 0; j < image.cols; j++) {
@@ -132,14 +106,12 @@ Mat equalize(Mat image)
         }
     }
     
-    // Calculate cumulative histogram
     int cumulative[256] = {0};
     cumulative[0] = histogram[0];
     for(int i = 1; i < 256; i++) {
         cumulative[i] = cumulative[i-1] + histogram[i];
     }
     
-    // Calculate mapping
     float scale = 255.0f / (image.rows * image.cols);
     for(int i = 0; i < image.rows; i++) {
         for(int j = 0; j < image.cols; j++) {
@@ -148,9 +120,7 @@ Mat equalize(Mat image)
             res.at<uchar>(i,j) = cv::saturate_cast<uchar>(round(newValue));
         }
     }
-    /********************************************
-                END OF YOUR CODE
-    *********************************************/
+
     return res;
 }
 
@@ -161,56 +131,53 @@ Mat equalize(Mat image)
 Mat thresholdOtsu(Mat image)
 {
     Mat res = image.clone();
-    /********************************************
-                YOUR CODE HERE
-    *********************************************/
-    // Calculate histogram
-    float histogram[256] = {0};
-    for(int i = 0; i < image.rows; i++) {
-        for(int j = 0; j < image.cols; j++) {
-            histogram[image.at<uchar>(i,j)]++;
-        }
+
+    if (image.channels() > 1) {
+        cerr << "Erreur: L'image doit être en niveaux de gris pour appliquer Otsu." << endl;
+        return res;
     }
-    
-    // Normalize histogram
-    float total = image.rows * image.cols;
-    for(int i = 0; i < 256; i++) {
-        histogram[i] /= total;
+
+    vector<float> histogram(256, 0);
+    Mat hist;
+    int histSize = 256;
+    float range[] = {0, 256};
+    const float* histRange = {range};
+    calcHist(&image, 1, 0, Mat(), hist, 1, &histSize, &histRange);
+
+    float totalPixels = image.total();
+    for (int i = 0; i < 256; i++) {
+        histogram[i] = hist.at<float>(i) / totalPixels;
     }
-    
+
     float maxVariance = 0;
-    int threshold = 0;
+    int optimalThreshold = 0;
     
-    for(int t = 0; t < 256; t++) {
-        // Calculate weights
-        float w0 = 0, w1 = 0;
-        float mean0 = 0, mean1 = 0;
-        
-        for(int i = 0; i < 256; i++) {
-            if(i <= t) {
-                w0 += histogram[i];
-                mean0 += i * histogram[i];
-            } else {
-                w1 += histogram[i];
-                mean1 += i * histogram[i];
-            }
-        }
-        
-        if(w0 > 0) mean0 /= w0;
-        if(w1 > 0) mean1 /= w1;
-        
-        // Calculate between-class variance
-        float variance = w0 * w1 * (mean0 - mean1) * (mean0 - mean1);
-        
-        if(variance > maxVariance) {
+    float sumTotal = 0, sumBackground = 0, weightBackground = 0, weightForeground = 0;
+    
+    for (int i = 0; i < 256; i++) {
+        sumTotal += i * histogram[i];
+    }
+
+    for (int t = 0; t < 256; t++) {
+        weightBackground += histogram[t];
+        if (weightBackground == 0) continue;
+
+        weightForeground = 1 - weightBackground;
+        if (weightForeground == 0) break; 
+
+        sumBackground += t * histogram[t]; 
+        float meanBackground = sumBackground / weightBackground;
+        float meanForeground = (sumTotal - sumBackground) / weightForeground;
+
+        float variance = weightBackground * weightForeground * pow(meanBackground - meanForeground, 2);
+
+        if (variance > maxVariance) {
             maxVariance = variance;
-            threshold = t;
+            optimalThreshold = t;
         }
     }
-    
-    cv::threshold(image, res, threshold, 255, cv::THRESH_BINARY);
-    /********************************************
-                END OF YOUR CODE
-    *********************************************/
+
+    threshold(image, res, optimalThreshold, 255, THRESH_BINARY);
+
     return res;
 }

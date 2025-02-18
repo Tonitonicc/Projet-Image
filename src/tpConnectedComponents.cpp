@@ -4,6 +4,7 @@
 #include <tuple>
 #include <vector>
 #include <map>
+#include <stack>
 using namespace cv;
 using namespace std;
 
@@ -15,68 +16,134 @@ using namespace std;
 */
 cv::Mat ccLabel(cv::Mat image)
 {
-    Mat res = Mat::zeros(image.rows, image.cols, CV_32SC1); // 32 int image
+    std::cout << "Starting ccLabel..." << std::endl;
+    Mat binary;
+    if(image.depth() == CV_32F) {
+        std::cout << "Converting float image to binary..." << std::endl;
+        image = image * 255;
+        image.convertTo(binary, CV_8UC1);
+    } else {
+        std::cout << "Copying image to binary..." << std::endl;
+        image.copyTo(binary);
+    }
+    std::cout << "Thresholding image..." << std::endl;
+    threshold(binary, binary, 127, 255, THRESH_BINARY);
+    
+    std::cout << "Creating result matrix..." << std::endl;
+    Mat res = Mat::zeros(image.rows, image.cols, CV_32SC1);
     int currentLabel = 1;
     
-    // Recursive function to label connected components
-    std::function<void(int, int, int)> labelDFS = [&](int row, int col, int label) {
-        if (row < 0 || row >= image.rows || col < 0 || col >= image.cols) return;
-        if (image.at<uchar>(row, col) == 0 || res.at<int>(row, col) != 0) return;
-        
-        // Label current pixel
-        res.at<int>(row, col) = label;
-        
-        // Visit 4-connected neighbors
-        labelDFS(row-1, col, label); // up
-        labelDFS(row+1, col, label); // down
-        labelDFS(row, col-1, label); // left
-        labelDFS(row, col+1, label); // right
-    };
-    
-    // Scan the image
-    for(int i = 0; i < image.rows; i++) {
-        for(int j = 0; j < image.cols; j++) {
-            if(image.at<uchar>(i, j) != 0 && res.at<int>(i, j) == 0) {
-                labelDFS(i, j, currentLabel);
-                currentLabel++;
+    std::cout << "Starting image scan..." << std::endl;
+    try {
+        for(int i = 0; i < binary.rows; i++) {
+            for(int j = 0; j < binary.cols; j++) {
+                if(binary.at<uchar>(i, j) != 0 && res.at<int>(i, j) == 0) {
+                    std::cout << "Found new component at (" << i << "," << j << ") with label " << currentLabel << std::endl;
+                    
+                    std::stack<std::pair<int, int>> stack;
+                    stack.push(std::make_pair(i, j));
+                    
+                    while(!stack.empty()) {
+                        int row = stack.top().first;
+                        int col = stack.top().second;
+                        stack.pop();
+                        
+                        if (row < 0 || row >= binary.rows || col < 0 || col >= binary.cols) 
+                            continue;
+                        if (binary.at<uchar>(row, col) == 0 || res.at<int>(row, col) != 0) 
+                            continue;
+                        
+
+                        res.at<int>(row, col) = currentLabel;
+                        
+
+                        stack.push(std::make_pair(row-1, col)); 
+                        stack.push(std::make_pair(row+1, col)); 
+                        stack.push(std::make_pair(row, col-1)); 
+                        stack.push(std::make_pair(row, col+1)); 
+                    }
+                    
+                    currentLabel++;
+                }
             }
         }
+    } catch (const std::exception& e) {
+        std::cerr << "Error during image scan: " << e.what() << std::endl;
+        throw;
     }
-    return res;
+    
+    std::cout << "Converting to float..." << std::endl;
+    Mat normalized;
+    res.convertTo(normalized, CV_32FC1);
+    normalize(normalized, normalized, 0, 1, NORM_MINMAX);
+    
+    std::cout << "ccLabel completed." << std::endl;
+    return normalized;
 }
 
 /**
     Deletes the connected components (4 connectivity) containg less than size pixels.
 */
-cv::Mat ccAreaFilter(cv::Mat image, int size)
+Mat ccAreaFilter(Mat image, int size)
 {
-    Mat res = Mat::zeros(image.rows, image.cols, image.type());
-    assert(size>0);
-    // First, label all connected components
-    Mat labels = ccLabel(image);
-    
-    // Count pixels for each label
+    if (image.empty()) {
+        cerr << "Erreur : Impossible de charger l'image d'entrée !" << endl;
+        return Mat();
+    }
+
+    Mat binary;
+    if (image.depth() == CV_32F) {
+        image = image * 255; 
+        image.convertTo(binary, CV_8UC1);
+    } else {
+        image.copyTo(binary);
+    }
+    threshold(binary, binary, 127, 255, THRESH_BINARY);
+
+    Mat labels;
+    int numLabels = connectedComponents(binary, labels, 8, CV_32S);
+    cout << "Nombre total de labels détectés : " << numLabels - 1 << endl;
+
     map<int, int> labelCount;
-    for(int i = 0; i < labels.rows; i++) {
-        for(int j = 0; j < labels.cols; j++) {
+    for (int i = 0; i < labels.rows; i++) {
+        for (int j = 0; j < labels.cols; j++) {
             int label = labels.at<int>(i, j);
-            if(label > 0) {
+            if (label > 0) {
                 labelCount[label]++;
             }
         }
     }
-    
-    // Keep only components with size >= threshold
-    for(int i = 0; i < image.rows; i++) {
-        for(int j = 0; j < image.cols; j++) {
+
+    cout << "=== Début des tailles des composants ===" << endl;
+    for (const auto &pair : labelCount) {
+        cout << "Label " << pair.first << " -> Taille : " << pair.second << " pixels" << endl;
+    }
+    cout << "=== Fin des tailles des composants ===" << endl;
+
+    Mat res = Mat::zeros(binary.size(), CV_8UC1);
+    for (int i = 0; i < labels.rows; i++) {
+        for (int j = 0; j < labels.cols; j++) {
             int label = labels.at<int>(i, j);
-            if(label > 0 && labelCount[label] >= size) {
-                res.at<uchar>(i, j) = image.at<uchar>(i, j);
+            if (label > 0 && labelCount[label] >= size) {
+                res.at<uchar>(i, j) = 255;
             }
         }
     }
+
+    if (countNonZero(res) == 0) {
+        cerr << "⚠️ Attention : L'image finale est vide après filtrage ! Aucun composant ne dépasse le seuil." << endl;
+    }
+
+    imwrite("filtered.png", res);
+    cout << "✅ Image filtrée enregistrée sous 'filtered.png'" << endl;
+
+    imshow("Filtered Image", res);
+    waitKey(0);
+    destroyAllWindows();
+
     return res;
 }
+
 
 
 /**
@@ -86,71 +153,82 @@ cv::Mat ccAreaFilter(cv::Mat image, int size)
 */
 cv::Mat ccTwoPassLabel(cv::Mat image)
 {
-    Mat res = Mat::zeros(image.rows, image.cols, CV_32SC1); // 32 int image
-    vector<int> labels(1, 0);  // labels[0] is unused
-    map<int, vector<int>> equivalences;
+    std::cout << "Starting ccTwoPassLabel..." << std::endl;
+
+    Mat binary;
+    if(image.depth() == CV_32F) {
+        image = image * 255;
+        image.convertTo(binary, CV_8UC1);
+    } else {
+        image.copyTo(binary);
+    }
+    threshold(binary, binary, 127, 255, THRESH_BINARY);
+
+    Mat labels = Mat::zeros(binary.size(), CV_32SC1);
     int currentLabel = 1;
-    
-    // First pass: assign temporary labels and record equivalences
-    for(int i = 0; i < image.rows; i++) {
-        for(int j = 0; j < image.cols; j++) {
-            if(image.at<uchar>(i, j) == 0) continue;
-            
-            vector<int> neighbors;
-            // Check left and up neighbors
-            if(j > 0 && res.at<int>(i, j-1) > 0)
-                neighbors.push_back(res.at<int>(i, j-1));
-            if(i > 0 && res.at<int>(i-1, j) > 0)
-                neighbors.push_back(res.at<int>(i-1, j));
-            
-            if(neighbors.empty()) {
-                // New label
-                res.at<int>(i, j) = currentLabel;
-                labels.push_back(currentLabel);
-                currentLabel++;
-            } else {
-                // Use minimum neighbor label
-                int minLabel = *min_element(neighbors.begin(), neighbors.end());
-                res.at<int>(i, j) = minLabel;
-                
-                // Record equivalences
-                for(int neighbor : neighbors) {
-                    if(neighbor != minLabel) {
-                        equivalences[minLabel].push_back(neighbor);
-                        equivalences[neighbor].push_back(minLabel);
-                    }
+    std::map<int, int> parent;
+
+    auto findRoot = [&](int label) {
+        while (parent[label] != label) {
+            parent[label] = parent[parent[label]];
+            label = parent[label];
+        }
+        return label;
+    };
+
+    std::cout << "First pass..." << std::endl;
+    for (int i = 0; i < binary.rows; i++) {
+        for (int j = 0; j < binary.cols; j++) {
+            if (binary.at<uchar>(i, j) != 0) {
+                int left = (j > 0) ? labels.at<int>(i, j - 1) : 0;
+                int above = (i > 0) ? labels.at<int>(i - 1, j) : 0;
+
+                if (left == 0 && above == 0) {
+                    labels.at<int>(i, j) = currentLabel;
+                    parent[currentLabel] = currentLabel;
+                    currentLabel++;
+                } else if (left != 0 && above == 0) {
+                    labels.at<int>(i, j) = findRoot(left);
+                } else if (left == 0 && above != 0) {
+                    labels.at<int>(i, j) = findRoot(above);
+                } else { 
+                    int minLabel = std::min(findRoot(left), findRoot(above));
+                    int maxLabel = std::max(findRoot(left), findRoot(above));
+
+                    labels.at<int>(i, j) = minLabel;
+                    parent[maxLabel] = minLabel;
                 }
             }
         }
     }
-    
-    // Resolve equivalences using union-find
-    vector<int> parent(labels.size());
-    for(int i = 0; i < parent.size(); i++) parent[i] = i;
-    
-    function<int(int)> find = [&](int x) {
-        if(parent[x] != x)
-            parent[x] = find(parent[x]);
-        return parent[x];
-    };
-    
-    for(const auto& equiv : equivalences) {
-        int label1 = equiv.first;
-        for(int label2 : equiv.second) {
-            int root1 = find(label1);
-            int root2 = find(label2);
-            if(root1 != root2)
-                parent[root2] = root1;
-        }
+
+    std::cout << "Union-Find full propagation..." << std::endl;
+    for (auto &p : parent) {
+        p.second = findRoot(p.first);
     }
-    
-    // Second pass: relabel using resolved equivalences
-    for(int i = 0; i < image.rows; i++) {
-        for(int j = 0; j < image.cols; j++) {
-            if(res.at<int>(i, j) > 0) {
-                res.at<int>(i, j) = find(res.at<int>(i, j));
+
+    std::cout << "Second pass..." << std::endl;
+    int maxLabel = 0; 
+    for (int i = 0; i < labels.rows; i++) {
+        for (int j = 0; j < labels.cols; j++) {
+            int label = labels.at<int>(i, j);
+            if (label != 0) {
+                labels.at<int>(i, j) = findRoot(label);
+                maxLabel = std::max(maxLabel, labels.at<int>(i, j));
             }
         }
     }
-    return res;
+
+    if (maxLabel == 0) {
+        std::cerr << "Error: All labels are zero. Check input image and labeling process." << std::endl;
+        return Mat::zeros(binary.size(), CV_32FC1);
+    }
+
+    std::cout << "Normalizing labels..." << std::endl;
+    Mat normalized;
+    labels.convertTo(normalized, CV_32FC1);
+    normalized /= maxLabel;
+
+    std::cout << "ccTwoPassLabel completed." << std::endl;
+    return normalized;
 }
